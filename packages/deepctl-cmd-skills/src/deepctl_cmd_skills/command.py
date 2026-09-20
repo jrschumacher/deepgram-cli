@@ -11,7 +11,7 @@ from deepctl_core.auth import AuthManager
 from deepctl_core.base_group_command import BaseGroupCommand
 from deepctl_core.client import DeepgramClient
 from deepctl_core.config import Config
-from deepctl_core.output import print_error, print_info, print_success, print_warning
+from deepctl_core.output import print_info, print_success, print_warning
 from rich.console import Console
 from rich.table import Table
 
@@ -261,11 +261,13 @@ class SkillsCommand(BaseGroupCommand):
         if cli_name:
             generators = [g for g in get_all_generators() if g.cli_name == cli_name]
             if not generators:
-                print_error(
+                # ClickException, not print_error + return: a bare return
+                # exits 0, and the README documents 1 for a command that
+                # fails. main.py prints the message and exits 1.
+                raise click.ClickException(
                     f"Unknown AI CLI: {cli_name}. "
                     "Run 'deepctl skills status' to see supported CLIs."
                 )
-                return
             if not generators[0].detect():
                 print_warning(
                     f"{generators[0].display_name} was not detected on this system."
@@ -402,8 +404,10 @@ class SkillsCommand(BaseGroupCommand):
         if cli_name:
             targets = [cli_name] if cli_name in installed else []
             if not targets:
-                print_error(f"No skills installed for '{cli_name}'.")
-                return
+                # Same contract as the unknown-CLI path above: asking to
+                # remove something that is not there is a failed command,
+                # which the README documents as exit 1, not 0.
+                raise click.ClickException(f"No skills installed for '{cli_name}'.")
         elif remove_all:
             targets = list(installed.keys())
         else:

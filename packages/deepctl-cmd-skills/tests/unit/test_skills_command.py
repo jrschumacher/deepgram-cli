@@ -93,6 +93,36 @@ class TestSkillsCommand:
 
         generator.install.assert_called_once()
 
+    def test_unknown_cli_exits_one(self):
+        """An unknown --cli must exit 1, not print an error and exit 0."""
+        cmd = SkillsCommand()
+        with patch(
+            "deepctl_core.skill_generator.get_all_generators",
+            return_value=[],
+        ):
+            with pytest.raises(click.ClickException) as exc:
+                cmd._handle_install(cli_name="nonexistent-cli")
+
+        assert "Unknown AI CLI: nonexistent-cli" in str(exc.value)
+
+    def test_removing_skills_that_are_not_installed_exits_one(self):
+        """`skills remove --cli X` with nothing installed for X exits 1."""
+        cmd = SkillsCommand()
+        with (
+            patch(
+                "deepctl_core.skill_generator.get_skills_state",
+                return_value={"installed_skills": {"claude": {"paths": []}}},
+            ),
+            patch(
+                "deepctl_core.skill_generator.get_all_generators",
+                return_value=[],
+            ),
+        ):
+            with pytest.raises(click.ClickException) as exc:
+                cmd._handle_remove(cli_name="cursor", remove_all=False)
+
+        assert "No skills installed for 'cursor'" in str(exc.value)
+
 
 class TestSkillsStartupCheck:
     """Test startup check module."""

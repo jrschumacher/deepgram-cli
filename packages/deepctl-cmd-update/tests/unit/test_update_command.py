@@ -448,3 +448,92 @@ class TestUpdateCommand:
         assert command.exit_code_for(result) == 0
         assert result["success"] is True
         mock_subprocess.assert_called_once()
+
+    # ------------------------------------------------------------------
+    # failure paths
+    # ------------------------------------------------------------------
+
+    @patch("deepctl_cmd_update.command.subprocess.run")
+    @patch("deepctl_cmd_update.command.InstallationDetector")
+    @patch("deepctl_cmd_update.command.asyncio.run")
+    @patch("deepctl_cmd_update.command.VersionChecker")
+    @patch("deepctl_cmd_update.command.get_console")
+    @patch("deepctl_cmd_update.command.format_version_message")
+    @patch("deepctl_cmd_update.command.print_info")
+    @patch("deepctl_cmd_update.command.print_error")
+    @patch("deepctl_cmd_update.command.Confirm.ask")
+    def test_failed_update_exits_one(
+        self,
+        mock_confirm,
+        mock_print_error,
+        mock_print_info,
+        mock_format_msg,
+        mock_console,
+        mock_checker_class,
+        mock_asyncio_run,
+        mock_detector_class,
+        mock_subprocess,
+        command,
+    ):
+        """A pip that exits non-zero must make `dg update` exit 1."""
+        mock_asyncio_run.return_value = VersionInfo(
+            current_version="0.1.0",
+            latest_version="0.2.0",
+            update_available=True,
+        )
+        mock_format_msg.return_value = "Update available!"
+
+        mock_detector = mock_detector_class.return_value
+        mock_detector.detect.return_value = InstallationInfo(
+            method=InstallMethod.PIP,
+            path="/path/to/deepctl",
+            virtual_env=True,
+            editable=False,
+            python_executable="/usr/bin/python3",
+        )
+        mock_detector.get_update_command.return_value = [
+            "pip",
+            "install",
+            "--upgrade",
+            "deepctl",
+        ]
+        mock_subprocess.return_value = MagicMock(
+            returncode=1, stderr="No matching distribution"
+        )
+        mock_confirm.return_value = True
+
+        result = command.handle(
+            config=MagicMock(),
+            auth_manager=MagicMock(),
+            client=MagicMock(),
+            yes=True,
+        )
+
+        assert command.exit_code_for(result) == 1
+        assert result.status == "error"
+        assert "No matching distribution" in result.message
+
+    @patch("deepctl_cmd_update.command.asyncio.run")
+    @patch("deepctl_cmd_update.command.VersionChecker")
+    @patch("deepctl_cmd_update.command.get_console")
+    @patch("deepctl_cmd_update.command.print_error")
+    def test_failed_version_check_exits_one(
+        self,
+        mock_print_error,
+        mock_console,
+        mock_checker_class,
+        mock_asyncio_run,
+        command,
+    ):
+        """An unreachable PyPI must make `dg update` exit 1, not 0."""
+        mock_asyncio_run.side_effect = RuntimeError("connection refused")
+
+        result = command.handle(
+            config=MagicMock(),
+            auth_manager=MagicMock(),
+            client=MagicMock(),
+        )
+
+        assert command.exit_code_for(result) == 1
+        assert result.status == "error"
+        assert "connection refused" in result.message

@@ -155,10 +155,12 @@ jobs:
     # Reads nothing and writes nothing: it installs from public PyPI. Drop the
     # workflow-level contents/pull-requests write it would otherwise inherit.
     permissions: {}
-    # The poll is bounded at 20 minutes on its own; this is the belt-and-braces
-    # ceiling for a hung runner or a wedged pip, so three release-advertising
-    # jobs can never sit queued behind this one indefinitely.
-    timeout-minutes: 30
+    # Belt-and-braces ceiling for a hung runner or a wedged pip, so three
+    # release-advertising jobs can never sit queued behind this one
+    # indefinitely. It has to clear the poll's own worst case, which is 20
+    # minutes of sleeps *plus* 60 resolution attempts -- a ceiling that cuts
+    # the loop short would kill the job before it prints the diagnosis below.
+    timeout-minutes: 45
     steps:
       - name: Set up Python
         uses: actions/setup-python@a309ff8b426b58ec0e2a45f0f869d46889d02405  # v6.2.0
