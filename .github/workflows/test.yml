@@ -4,6 +4,11 @@ on:
   push:
   pull_request:
 
+# Every job here only reads the repository: no job comments, labels, or
+# pushes. Least privilege rather than whatever the repo default happens to be.
+permissions:
+  contents: read
+
 jobs:
   test:
     name: Test Python ${{ matrix.python-version }} / ${{ matrix.os }}
@@ -62,7 +67,7 @@ jobs:
         run: uv run ruff check src/ packages/*/src scripts/
 
       - name: Type check
-        run: uv run mypy src/ packages/*/src
+        run: uv run mypy src/ packages/*/src scripts/
 
   floors:
     name: Dependency floors
@@ -74,6 +79,9 @@ jobs:
         uses: actions/setup-python@a309ff8b426b58ec0e2a45f0f869d46889d02405  # v6.2.0
         with:
           python-version: "3.12"
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@08807647e7069bb48b6ef5acd8ec9567f424441b  # v8.1.0
 
       # Root floors must equal workspace versions or `pip install --upgrade
       # deepctl` (what `dg update` runs) silently skips the packages whose

@@ -2,6 +2,7 @@
 
 from unittest.mock import MagicMock, patch
 
+import click
 import pytest
 from deepctl_cmd_skills.command import SkillsCommand
 
@@ -35,6 +36,62 @@ class TestSkillsCommand:
         assert "remove" in names
         assert "list" in names
         assert "status" in names
+
+    def test_declining_install_anyway_aborts_instead_of_exiting_zero(self):
+        """Declining the prompt must exit 2, not 0.
+
+        `_handle_install` is a plain click callback returning None, so there
+        is no result for BaseCommand.EXIT_CODES to map to an exit code. A
+        bare return made a declined install indistinguishable from a
+        successful one, contradicting the exit-code table in the README.
+        Abort is what main.py turns into 2.
+        """
+        cmd = SkillsCommand()
+        generator = MagicMock()
+        generator.cli_name = "claude"
+        generator.display_name = "Claude Code"
+        generator.detect.return_value = False
+
+        with (
+            patch(
+                "deepctl_core.skill_generator.get_all_generators",
+                return_value=[generator],
+            ),
+            patch.object(cmd, "confirm", return_value=False),
+        ):
+            with pytest.raises(click.Abort):
+                cmd._handle_install(cli_name="claude")
+
+        generator.install.assert_not_called()
+
+    def test_accepting_install_anyway_does_not_abort(self):
+        """Positive control: confirming must proceed to the install."""
+        cmd = SkillsCommand()
+        generator = MagicMock()
+        generator.cli_name = "claude"
+        generator.display_name = "Claude Code"
+        generator.detect.return_value = False
+        generator.install.return_value = []
+
+        with (
+            patch(
+                "deepctl_core.skill_generator.get_all_generators",
+                return_value=[generator],
+            ),
+            patch(
+                "deepctl_core.skill_generator.collect_command_metadata",
+                return_value={},
+            ),
+            patch(
+                "deepctl_core.skill_generator.get_skills_state",
+                return_value={"installed_skills": {}},
+            ),
+            patch("deepctl_core.skill_generator.save_skills_state"),
+            patch.object(cmd, "confirm", return_value=True),
+        ):
+            cmd._handle_install(cli_name="claude")
+
+        generator.install.assert_called_once()
 
 
 class TestSkillsStartupCheck:

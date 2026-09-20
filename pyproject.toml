@@ -87,6 +87,7 @@ dev = [
     # Code Quality
     "ruff>=0.8.0",
     "mypy>=1.0.0",
+    "packaging>=23.0",
     # Type Stubs
     "types-PyYAML>=6.0.0",
     "types-requests>=2.31.0",
@@ -128,7 +129,13 @@ include = ["deepctl*"]
 [tool.mypy]
 python_version = "3.10"
 strict = true
-files = "src/,packages/*/src"
+files = "src/,packages/*/src,scripts/"
+
+[[tool.mypy.overrides]]
+module = ["tomli"]
+# The pre-3.11 fallback for tomllib in scripts/. It is not installed, and
+# mypy checks that branch because python_version is pinned to 3.10.
+ignore_missing_imports = true
 
 [[tool.mypy.overrides]]
 module = "deepctl_cmd_mcp.*"
@@ -232,6 +239,10 @@ members = ["packages/*"]
 [dependency-groups]
 testing = [
     "pytest>=7.0.0",
+    # scripts/check_dependency_floors.py reads pyproject files; on 3.10 it
+    # falls back to tomli, and tests/unit/test_dependency_floors.py drives
+    # the real script on every version in the CI matrix.
+    "tomli>=2.0; python_version < '3.11'",
     "pytest-asyncio>=0.21.0",
     "pytest-cov>=4.0.0",
     "pytest-mock>=3.10.0",
@@ -244,6 +255,9 @@ dev = [
     # Code Quality
     "ruff>=0.8.0",
     "mypy>=1.0.0",
+    # PEP 440 comparisons in scripts/check_dependency_floors.py. Declared
+    # rather than leaned on as a transitive of build/twine.
+    "packaging>=23.0",
     # Type Stubs
     "types-pyyaml>=6.0.12.20250516",
     "types-requests>=2.32.4.20250611",

@@ -89,8 +89,10 @@ dedicated PAT or GitHub App token.
 polls PyPI until `pip install deepctl==X` resolves its full closure, then
 installs it for real and runs the CLI. `mark-latest`, `deploy-web`, and the
 Homebrew bump all wait on it. If it times out, PyPI has not propagated or a
-sub-package failed to publish — re-run that one job once PyPI has caught up
-and the three downstream jobs re-evaluate.
+sub-package failed to publish — re-run all jobs on that workflow run once
+PyPI has caught up; re-running only the failed job leaves the three
+downstream jobs skipped. Re-running all jobs is safe: the publish step uses
+`skip-existing`.
 
 ### Testing
 

@@ -8,7 +8,7 @@ import sys
 from pathlib import Path
 
 
-def build_standalone():
+def build_standalone() -> None:
     """Build a standalone deepctl binary using PyInstaller."""
     # Check if we're in the right directory
     if not Path("pyproject.toml").exists():

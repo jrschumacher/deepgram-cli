@@ -120,7 +120,7 @@ lint-check: ## Run ruff without fixes
 
 ## Type Checking
 typecheck: ## Run mypy type checker
-	uv run mypy src/ packages/**/src
+	uv run mypy src/ packages/**/src scripts/
 
 ## All Checks
 quality: format-check lint-check typecheck ## Run all quality checks
@@ -149,10 +149,10 @@ readmes-check: ## Check sub-package READMEs are up to date
 	python3 scripts/generate_readmes.py --check
 
 floors-check: ## Check intra-workspace dependency floors (root must pin workspace versions)
-	python3 scripts/check_dependency_floors.py
+	uv run python scripts/check_dependency_floors.py
 
 floors-fix: ## Pin root dependency floors to the current workspace versions
-	python3 scripts/check_dependency_floors.py --fix
+	uv run python scripts/check_dependency_floors.py --fix
 
 # ===================================================================
 # RUNNING THE CLI

@@ -271,7 +271,12 @@ class SkillsCommand(BaseGroupCommand):
                     f"{generators[0].display_name} was not detected on this system."
                 )
                 if not self.confirm("Install anyway?", default=False):
-                    return
+                    # Abort rather than return: these subcommands are plain
+                    # click callbacks, so nothing maps a returned result to an
+                    # exit code and a bare return exits 0 -- indistinguishable
+                    # from a successful install. main.py turns Abort into the
+                    # documented exit 2 for user cancellation.
+                    raise click.Abort()
         else:
             generators = detect_ai_clis()
 

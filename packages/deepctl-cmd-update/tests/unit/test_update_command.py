@@ -316,3 +316,135 @@ class TestUpdateCommand:
         assert result["success"] is False
         assert result["installation_method"] == "development"
         mock_print_warning.assert_called_once()
+
+    # ------------------------------------------------------------------
+    # declining the confirmation prompt
+    # ------------------------------------------------------------------
+
+    @patch("deepctl_cmd_update.command.subprocess.run")
+    @patch("deepctl_cmd_update.command.InstallationDetector")
+    @patch("deepctl_cmd_update.command.asyncio.run")
+    @patch("deepctl_cmd_update.command.VersionChecker")
+    @patch("deepctl_cmd_update.command.get_console")
+    @patch("deepctl_cmd_update.command.format_version_message")
+    @patch("deepctl_cmd_update.command.print_info")
+    @patch("deepctl_cmd_update.command.Confirm.ask")
+    def test_declining_the_prompt_reports_cancelled_and_exits_two(
+        self,
+        mock_confirm,
+        mock_print_info,
+        mock_format_msg,
+        mock_console,
+        mock_checker_class,
+        mock_asyncio_run,
+        mock_detector_class,
+        mock_subprocess,
+        command,
+    ):
+        """Declining must exit 2, and say "cancelled" in the payload.
+
+        The README documents exit 2 for declining a confirmation prompt.
+        This path used to return `.model_dump()` -- a plain dict, which
+        `BaseCommand.exit_code_for` cannot read a status off -- so the
+        process exited 0 while the very same JSON payload carried
+        `"status": "success"` next to "Update cancelled by user".
+        """
+        mock_asyncio_run.return_value = VersionInfo(
+            current_version="0.1.0",
+            latest_version="0.2.0",
+            update_available=True,
+        )
+        mock_format_msg.return_value = "Update available!"
+
+        mock_detector = mock_detector_class.return_value
+        mock_detector.detect.return_value = InstallationInfo(
+            method=InstallMethod.PIP,
+            path="/path/to/deepctl",
+            virtual_env=True,
+            editable=False,
+            python_executable="/usr/bin/python3",
+        )
+        mock_detector.get_update_command.return_value = [
+            "pip",
+            "install",
+            "--upgrade",
+            "deepctl",
+        ]
+
+        mock_confirm.return_value = False
+
+        result = command.handle(
+            config=MagicMock(),
+            auth_manager=MagicMock(),
+            client=MagicMock(),
+            yes=False,
+        )
+
+        assert command.exit_code_for(result) == 2
+        assert result.status == "cancelled"
+        assert result.success is False
+        assert result.message == "Update cancelled by user"
+        mock_subprocess.assert_not_called()
+
+    @patch("deepctl_cmd_update.command.subprocess.run")
+    @patch("deepctl_cmd_update.command.InstallationDetector")
+    @patch("deepctl_cmd_update.command.asyncio.run")
+    @patch("deepctl_cmd_update.command.VersionChecker")
+    @patch("deepctl_cmd_update.command.get_console")
+    @patch("deepctl_cmd_update.command.format_version_message")
+    @patch("deepctl_cmd_update.command.print_info")
+    @patch("deepctl_cmd_update.command.print_success")
+    @patch("deepctl_cmd_update.command.Confirm.ask")
+    def test_successful_update_still_exits_zero(
+        self,
+        mock_confirm,
+        mock_print_success,
+        mock_print_info,
+        mock_format_msg,
+        mock_console,
+        mock_checker_class,
+        mock_asyncio_run,
+        mock_detector_class,
+        mock_subprocess,
+        command,
+    ):
+        """Negative control: accepting the prompt must still exit 0.
+
+        Only the decline path carries a status, so the success payload maps
+        to 0 -- the point is that adding "cancelled" did not make an accepted
+        update exit non-zero.
+        """
+        mock_asyncio_run.return_value = VersionInfo(
+            current_version="0.1.0",
+            latest_version="0.2.0",
+            update_available=True,
+        )
+        mock_format_msg.return_value = "Update available!"
+
+        mock_detector = mock_detector_class.return_value
+        mock_detector.detect.return_value = InstallationInfo(
+            method=InstallMethod.PIP,
+            path="/path/to/deepctl",
+            virtual_env=True,
+            editable=False,
+            python_executable="/usr/bin/python3",
+        )
+        mock_detector.get_update_command.return_value = [
+            "pip",
+            "install",
+            "--upgrade",
+            "deepctl",
+        ]
+        mock_subprocess.return_value = MagicMock(returncode=0, stderr="")
+        mock_confirm.return_value = True
+
+        result = command.handle(
+            config=MagicMock(),
+            auth_manager=MagicMock(),
+            client=MagicMock(),
+            yes=False,
+        )
+
+        assert command.exit_code_for(result) == 0
+        assert result["success"] is True
+        mock_subprocess.assert_called_once()

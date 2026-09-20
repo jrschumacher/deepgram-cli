@@ -68,9 +68,9 @@ jobs:
       - name: Regenerate uv.lock and pin root floors
         run: |
           set -euo pipefail
-          python3 scripts/check_dependency_floors.py --fix
+          uv run python scripts/check_dependency_floors.py --fix
           uv lock
-          python3 scripts/check_dependency_floors.py
+          uv run python scripts/check_dependency_floors.py
 
       - name: Commit and push if changed
         run: |
@@ -152,6 +152,13 @@ jobs:
       needs.release-please.outputs.release_created == 'true' &&
       startsWith(needs.release-please.outputs.tag_name, 'v')
     runs-on: ubuntu-latest
+    # Reads nothing and writes nothing: it installs from public PyPI. Drop the
+    # workflow-level contents/pull-requests write it would otherwise inherit.
+    permissions: {}
+    # The poll is bounded at 20 minutes on its own; this is the belt-and-braces
+    # ceiling for a hung runner or a wedged pip, so three release-advertising
+    # jobs can never sit queued behind this one indefinitely.
+    timeout-minutes: 30
     steps:
       - name: Set up Python
         uses: actions/setup-python@a309ff8b426b58ec0e2a45f0f869d46889d02405  # v6.2.0
@@ -178,7 +185,13 @@ jobs:
             echo "Waiting for deepctl==${VERSION} to resolve (${i}/60)..."
             sleep 20
           done
-          echo "::error::deepctl==${VERSION} did not resolve from PyPI after 20 minutes -- a dependency is missing or the index has not propagated. Re-run this job once PyPI has propagated; mark-latest, deploy-web and bump-brew-formula re-evaluate and will then run."
+          # Every attempt above discarded its output, so the operator would
+          # otherwise get a bare error line and have to reproduce by hand.
+          # Run once more with the output visible: pip's resolver says which
+          # requirement it could not satisfy.
+          echo "Resolution still failing. Final attempt, with output:"
+          /tmp/verify/bin/pip install --dry-run --no-cache-dir "deepctl==${VERSION}" || true
+          echo "::error::deepctl==${VERSION} did not resolve from PyPI after 20 minutes -- a dependency is missing or the index has not propagated. Once PyPI has propagated, use 'Re-run all jobs' on this workflow run -- re-running only this job leaves mark-latest, deploy-web and bump-brew-formula skipped. Re-running all jobs is safe: the PyPI publish step uses skip-existing."
           exit 1
         env:
           TAG_NAME: ${{ needs.release-please.outputs.tag_name }}
@@ -264,27 +277,10 @@ jobs:
         with:
           python-version: "3.13"
 
-      - name: Wait for new deepctl version on PyPI
-        run: |
-          set -euo pipefail
-          VERSION="${TAG_NAME#v}"
-          # Poll the PyPI JSON API rather than `pip index versions`. The
-          # JSON endpoint flips the moment a release is published, while
-          # the simple index pip queries can lag 5-15 minutes behind a
-          # successful publish (CDN caching of project metadata).
-          URL="https://pypi.org/pypi/deepctl/${VERSION}/json"
-          for i in $(seq 1 30); do
-            if [ "$(curl -fsS -o /dev/null -w '%{http_code}' "${URL}")" = "200" ]; then
-              echo "deepctl==${VERSION} is live on PyPI"
-              exit 0
-            fi
-            echo "Waiting for deepctl==${VERSION} on PyPI (${i}/30)..."
-            sleep 20
-          done
-          echo "::error::deepctl==${VERSION} did not appear on PyPI after 10 minutes"
-          exit 1
-        env:
-          TAG_NAME: ${{ needs.release-please.outputs.tag_name }}
+      # No PyPI poll here: verify-published is in `needs`, and it does not
+      # finish until `pip install deepctl==X` resolves its full closure and
+      # the installed CLI runs. A second, weaker poll behind that gate can
+      # only cost time.
 
       - name: Checkout homebrew-tap
         uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5  # v4

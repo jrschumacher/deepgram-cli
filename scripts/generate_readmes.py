@@ -12,14 +12,18 @@ import argparse
 import re
 import sys
 from pathlib import Path
+from typing import Any
 
-try:
+if sys.version_info >= (3, 11):
     import tomllib
-except ModuleNotFoundError:
+else:  # pragma: no cover - only taken on Python 3.10
     try:
-        import tomli as tomllib  # type: ignore[no-redef]
+        import tomli as tomllib
     except ModuleNotFoundError:
-        print("Python 3.11+ required (tomllib), or install tomli: pip install tomli")
+        print(
+            "Python 3.11+ required (tomllib), or install tomli: pip install tomli",
+            file=sys.stderr,
+        )
         sys.exit(1)
 
 ROOT = Path(__file__).resolve().parent.parent
@@ -32,13 +36,14 @@ SKIP_PACKAGES: set[str] = set()
 INTERNAL_PREFIXES = ("deepctl-core", "deepctl-cmd-", "deepctl-shared-")
 
 
-def load_pyproject(package_dir: Path) -> dict:
+def load_pyproject(package_dir: Path) -> dict[str, Any]:
     """Load and return parsed pyproject.toml."""
     with open(package_dir / "pyproject.toml", "rb") as f:
-        return tomllib.load(f)
+        data: dict[str, Any] = tomllib.load(f)
+        return data
 
 
-def classify_package(name: str, data: dict) -> str:
+def classify_package(name: str, data: dict[str, Any]) -> str:
     """Classify a package as 'command', 'debug-subcommand', or 'core'."""
     if re.match(r"^deepctl-cmd-debug-.+$", name):
         return "debug-subcommand"
@@ -61,7 +66,7 @@ def get_external_deps(deps: list[str]) -> list[str]:
     return external
 
 
-def get_entry_points(data: dict) -> dict[str, str]:
+def get_entry_points(data: dict[str, Any]) -> dict[str, str]:
     """Extract command entry points from pyproject.toml."""
     entry_points = {}
     eps = data.get("project", {}).get("entry-points", {})
@@ -119,8 +124,8 @@ def render_extra_content(package_dir: Path) -> list[str]:
 def render_command_readme(
     name: str,
     description: str,
-    entry_points: dict,
-    external_deps: list,
+    entry_points: dict[str, str],
+    external_deps: list[str],
     package_dir: Path,
 ) -> str:
     """Render README for a command package (deepctl-cmd-*)."""
@@ -162,8 +167,8 @@ def render_command_readme(
 def render_debug_subcommand_readme(
     name: str,
     description: str,
-    entry_points: dict,
-    external_deps: list,
+    entry_points: dict[str, str],
+    external_deps: list[str],
     package_dir: Path,
 ) -> str:
     """Render README for a debug subcommand package."""
@@ -207,7 +212,7 @@ def render_debug_subcommand_readme(
 def render_core_readme(
     name: str,
     description: str,
-    external_deps: list,
+    external_deps: list[str],
     package_dir: Path,
 ) -> str:
     """Render README for a core/utility package."""
@@ -280,7 +285,7 @@ def get_package_dirs(single: str | None = None) -> list[Path]:
 # ── Root README section generators ──────────────────────────────
 
 
-def get_all_packages() -> list[dict]:
+def get_all_packages() -> list[dict[str, Any]]:
     """Load metadata for all packages in the workspace."""
     packages = []
     for pkg_dir in sorted(PACKAGES_DIR.iterdir()):
@@ -301,7 +306,7 @@ def get_all_packages() -> list[dict]:
     return packages
 
 
-def generate_commands_section(packages: list[dict]) -> str:
+def generate_commands_section(packages: list[dict[str, Any]]) -> str:
     """Generate the commands markdown table."""
     rows = []
     for pkg in packages:
@@ -321,7 +326,7 @@ def generate_commands_section(packages: list[dict]) -> str:
     return "\n".join(lines)
 
 
-def generate_packages_section(packages: list[dict]) -> str:
+def generate_packages_section(packages: list[dict[str, Any]]) -> str:
     """Generate the packages markdown table."""
     lines = [
         "| Package | Description |",
@@ -334,7 +339,7 @@ def generate_packages_section(packages: list[dict]) -> str:
     return "\n".join(lines)
 
 
-def generate_architecture_section(packages: list[dict]) -> str:
+def generate_architecture_section(packages: list[dict[str, Any]]) -> str:
     """Generate the ASCII architecture tree."""
     comment_col = 38
 
@@ -374,8 +379,10 @@ def replace_section(content: str, section: str, replacement: str) -> str:
         re.DOTALL,
     )
 
-    def repl(m: re.Match) -> str:
-        return m.group(1) + replacement + "\n" + m.group(2)
+    def repl(m: re.Match[str]) -> str:
+        begin: str = m.group(1)
+        end: str = m.group(2)
+        return begin + replacement + "\n" + end
 
     return pattern.sub(repl, content)
 
@@ -421,7 +428,7 @@ def update_root_readme(*, dry_run: bool = False, check: bool = False) -> bool:
     return True
 
 
-def main():
+def main() -> None:
     parser = argparse.ArgumentParser(
         description="Generate README files from pyproject.toml metadata"
     )

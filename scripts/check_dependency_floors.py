@@ -27,6 +27,11 @@ Three rules, learned from the 0.3.0 release (PRs #100/#102):
    deliberately not shipped as part of the CLI goes in NOT_SHIPPED, so that
    intent is stated in the diff rather than inferred from an omission.
 
+Versions are compared with `packaging.version.Version`, not as strings, so a
+pre-release anywhere in the workspace (0.4.0rc1, 1.0.0.dev1, 0.3.0.post1)
+behaves like any other version instead of turning `--fix` into a loop the
+following check can never satisfy.
+
 Run with --fix to rewrite root floors in place (used by the release
 workflow's sync job so rule 1 holds automatically on every release PR).
 """
@@ -37,16 +42,22 @@ import argparse
 import json
 import re
 import sys
+from dataclasses import dataclass
 from pathlib import Path
 
-try:
+if sys.version_info >= (3, 11):
     import tomllib
-except ModuleNotFoundError:
+else:  # pragma: no cover - only taken on Python 3.10
     try:
-        import tomli as tomllib  # type: ignore[no-redef]
+        import tomli as tomllib
     except ModuleNotFoundError:
-        print("Python 3.11+ required (tomllib), or install tomli: pip install tomli")
+        print(
+            "Python 3.11+ required (tomllib), or install tomli: pip install tomli",
+            file=sys.stderr,
+        )
         sys.exit(1)
+
+from packaging.version import InvalidVersion, Version
 
 REPO = Path(__file__).resolve().parent.parent
 MANIFEST = REPO / ".github" / ".release-please-manifest.json"
@@ -57,6 +68,34 @@ NOT_SHIPPED = {
     "deepctl",  # the root package itself
     "deepctl-plugin-example",  # sample plugin, installed on demand
 }
+
+# A PEP 508 requirement, narrowed to intra-workspace packages: the name, an
+# optional extras group, then whatever the author wrote after it. Matching
+# only bare `name>=version` used to make `deepctl-cmd-keys[extra]>=0.0.1` or
+# `deepctl-cmd-keys==0.1.0` invisible to rules 1 and 3, so the guard reported
+# a listed package as missing from root entirely.
+_DEP_RE = re.compile(
+    r"^\s*(?P<name>deepctl[A-Za-z0-9._-]*)"
+    r"\s*(?:\[[^\]]*\])?"
+    r"\s*(?P<rest>.*)$"
+)
+# The floor itself. The version runs to the first delimiter, so an upper
+# bound (`,<2`), an environment marker (`; python_version < "3.12"`) and a
+# PEP 440 suffix (`0.4.0rc1`) all survive intact.
+_FLOOR_RE = re.compile(r"^(?P<spec>>=\s*(?P<version>[^\s,;]+))")
+
+
+@dataclass(frozen=True)
+class Dep:
+    """One intra-workspace dependency as root or a package declares it."""
+
+    name: str
+    #: The pinned floor, or None when the spec is not a plain `>=`.
+    floor: str | None
+    #: Exact `>=…` text matched, so --fix can rewrite it in place.
+    spec: str
+    #: The whole dependency string, as written.
+    raw: str
 
 
 def workspace_versions() -> dict[str, str]:
@@ -71,29 +110,39 @@ def workspace_versions() -> dict[str, str]:
     return versions
 
 
-def floors(pyproject: Path) -> list[tuple[str, str, str]]:
-    """Yield (name, floor, raw-spec) for each intra-workspace dependency."""
+def floors(pyproject: Path) -> list[Dep]:
+    """Return every intra-workspace dependency declared by `pyproject`."""
     deps = tomllib.loads(pyproject.read_text(encoding="utf-8"))["project"].get(
         "dependencies", []
     )
-    out = []
+    out: list[Dep] = []
     for dep in deps:
-        m = re.match(r"^(deepctl[\w-]*)>=([0-9][0-9.]*)", dep)
-        if m:
-            out.append((m.group(1), m.group(2), dep))
+        m = _DEP_RE.match(dep)
+        if not m:
+            continue
+        floor = _FLOOR_RE.match(m.group("rest").strip())
+        out.append(
+            Dep(
+                name=m.group("name"),
+                floor=floor.group("version") if floor else None,
+                spec=floor.group("spec") if floor else "",
+                raw=dep,
+            )
+        )
     return out
 
 
-def vkey(version: str) -> list[int]:
-    """Sortable key from the numeric release segments only.
+def parse(version: str) -> Version | None:
+    """PEP 440 version, or None when the string is not a valid version.
 
-    PEP 440 suffixes (0.4.0rc1, 1.0.0.dev1, 0.3.0.post1) and local versions
-    are ignored rather than crashing the comparison -- a single hand-set
-    pre-release anywhere in the workspace used to turn `make floors-check`
-    into a bare ValueError traceback naming no package.
+    Returning None rather than raising keeps one hand-typed oddity from
+    turning `make floors-check` into a bare traceback naming no package; the
+    caller reports it as an ordinary problem instead.
     """
-    release = re.match(r"\d+(?:\.\d+)*", version)
-    return [int(part) for part in release.group().split(".")] if release else [0]
+    try:
+        return Version(version)
+    except InvalidVersion:
+        return None
 
 
 def main() -> int:
@@ -113,12 +162,30 @@ def main() -> int:
     root_text = root.read_text(encoding="utf-8")
     fixed = root_text
     root_floors = floors(root)
-    for name, floor, raw in root_floors:
-        current = versions.get(name)
+    for dep in root_floors:
+        current = versions.get(dep.name)
         if current is None:
-            problems.append(f"root depends on {name}, which is not in the manifest")
+            problems.append(f"root depends on {dep.name}, which is not in the manifest")
             continue
-        if floor == current:
+        if dep.floor is None:
+            problems.append(
+                f"root dependency {dep.raw!r} does not pin a `>=` floor"
+                f" (root is the delivery manifest: write"
+                f" {dep.name}>={current} so pip upgrades deliver it)"
+            )
+            continue
+        floor_version, current_version = parse(dep.floor), parse(current)
+        if floor_version is None:
+            problems.append(
+                f"root floor {dep.name}>={dep.floor} is not a valid PEP 440 version"
+            )
+            continue
+        if current_version is None:
+            problems.append(
+                f"{dep.name} workspace version {current} is not a valid PEP 440 version"
+            )
+            continue
+        if floor_version == current_version:
             continue
         if args.fix:
             # Rewrite the version inside the spec we matched, so any upper
@@ -126,12 +193,12 @@ def main() -> int:
             # literal replace silently no-ops on those, and an unfixable
             # floor has to fall through to `problems` -- reporting "OK"
             # after failing to fix is worse than not fixing.
-            new_raw = raw.replace(f">={floor}", f">={current}", 1)
-            if new_raw != raw and f'"{raw}"' in fixed:
-                fixed = fixed.replace(f'"{raw}"', f'"{new_raw}"', 1)
+            new_raw = dep.raw.replace(dep.spec, f">={current}", 1)
+            if new_raw != dep.raw and f'"{dep.raw}"' in fixed:
+                fixed = fixed.replace(f'"{dep.raw}"', f'"{new_raw}"', 1)
                 continue
         problems.append(
-            f"root floor {name}>={floor} != workspace version {current}"
+            f"root floor {dep.name}>={dep.floor} != workspace version {current}"
             " (published fixes will not be delivered by pip upgrades)"
         )
     if args.fix and fixed != root_text:
@@ -143,20 +210,30 @@ def main() -> int:
         pyproject = pkg_dir / "pyproject.toml"
         if not pyproject.is_file():
             continue
-        for name, floor, _ in floors(pyproject):
-            current = versions.get(name)
+        for dep in floors(pyproject):
+            current = versions.get(dep.name)
             if current is None:
                 problems.append(
-                    f"{pkg_dir.name} depends on {name}, which is not in the manifest"
+                    f"{pkg_dir.name} depends on {dep.name},"
+                    " which is not in the manifest"
                 )
-            elif vkey(floor) > vkey(current):
+                continue
+            if dep.floor is None:
+                continue
+            floor_version, current_version = parse(dep.floor), parse(current)
+            if floor_version is None or current_version is None:
                 problems.append(
-                    f"{pkg_dir.name}: floor {name}>={floor} exceeds"
+                    f"{pkg_dir.name}: floor {dep.name}>={dep.floor} or workspace"
+                    f" version {current} is not a valid PEP 440 version"
+                )
+            elif floor_version > current_version:
+                problems.append(
+                    f"{pkg_dir.name}: floor {dep.name}>={dep.floor} exceeds"
                     f" workspace version {current} (unsatisfiable)"
                 )
 
     # Rule 3: every published package is a root dependency.
-    listed = {name for name, _, _ in root_floors}
+    listed = {dep.name for dep in root_floors}
     for name in sorted(set(versions) - listed - NOT_SHIPPED):
         problems.append(
             f"{name} is published but is not a root dependency"
@@ -169,9 +246,8 @@ def main() -> int:
         for problem in problems:
             print(f"  - {problem}", file=sys.stderr)
         print(
-            "\nRun `python3 scripts/check_dependency_floors.py --fix` to pin"
-            " stale root floors. Sub-package floors and missing root"
-            " dependencies are hand-maintained.",
+            "\nRun `make floors-fix` to pin stale root floors. Sub-package"
+            " floors and missing root dependencies are hand-maintained.",
             file=sys.stderr,
         )
         return 1

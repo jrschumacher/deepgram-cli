@@ -345,9 +345,10 @@ parseable across the failure — authentication failures, `dg ffprobe` and
 `dg debug audio` included. This is not yet universal: a handful of commands
 still echo their human-readable summary to stdout ahead of the payload, and a
 usage error (a bad flag, an unknown command) writes nothing to stdout at all.
-Branch on the exit code rather than on whether stdout parsed. If a CI step
-relied on `dg` always exiting `0` (every command did, before 0.3.0), it will
-now fail where it previously passed silently.
+Branch on the exit code rather than on whether stdout parsed.
+
+If a CI step relied on `dg` always exiting `0` (every command did, before
+0.3.0), it will now fail where it previously passed silently.
 
 ### Forcing non-interactive mode
 

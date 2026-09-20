@@ -69,8 +69,14 @@ class UpdateCommand(BaseCommand):
         auth_manager: Any,  # Not used for update command
         client: Any,  # Not used for update command
         **kwargs: Any,
-    ) -> dict[str, Any]:
-        """Handle the update command execution."""
+    ) -> UpdateResult | dict[str, Any]:
+        """Handle the update command execution.
+
+        Returns the model rather than a dict on the cancel path:
+        BaseCommand.exit_code_for reads `.status` off the result, and a dict
+        has none. output_result unwraps either, so the JSON payload is the
+        same shape from both.
+        """
         console = get_console()
 
         # Extract arguments from kwargs
@@ -167,14 +173,20 @@ class UpdateCommand(BaseCommand):
         # Confirm update
         if not yes and not Confirm.ask("\nDo you want to proceed with the update?"):
             print_info("Update cancelled")
+            # Return the model, not .model_dump(): BaseCommand.exit_code_for
+            # reads `.status` off the result, and a plain dict has none -- a
+            # declined update used to exit 0 while its own payload said
+            # "Update cancelled by user". status="cancelled" is the documented
+            # exit 2.
             return UpdateResult(
+                status="cancelled",
                 success=False,
                 message="Update cancelled by user",
                 current_version=version_info.current_version,
                 latest_version=version_info.latest_version,
                 update_available=version_info.update_available,
                 installation_method=install_info.method.value,
-            ).model_dump()
+            )
 
             # Execute update
         print_info("Updating deepctl...")
